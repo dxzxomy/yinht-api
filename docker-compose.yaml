@@ -1,0 +1,135 @@
+version: "3"
+
+networks:
+  netoops:
+    ipam:
+      config:
+        - subnet: 192.168.30.0/24
+
+services:
+  redis-server:
+    image: redis:6-buster
+    environment:
+      TZ: "Asia/Shanghai"
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200M"
+        max-file: "10"
+    networks:
+      - netoops
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /home/mingguangzhen/redis/data:/var/lib/redis
+      - /home/mingguangzhen/redis/conf:/etc/redis
+      - /home/mingguangzhen/redis/log:/var/log/redis
+    ports:
+      - "10.64.18.33:6379:6379"
+    command: /etc/redis/redis.conf
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1000M
+
+  kscrcdn_api:
+    build: /home/mingguangzhen/kscrcdn_api
+    image: kscrcdn_api
+    environment:
+      TZ: "Asia/Shanghai"
+    extra_hosts:
+      - "mysql-server:10.69.79.101"
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200M"
+        max-file: "10"
+    networks:
+      - netoops
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /home/mingguangzhen/kscrcdn_api:/kscrcdn_api
+    depends_on:
+      - redis-server
+    command: /usr/local/bin/gunicorn -c kscrcdn_api/config/webconfig.py kscrcdn_api.wsgi:app
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 2G
+
+  fe_kscrcdn:
+    build: /home/mingguangzhen/fe_kscrcdn
+    image: fe_kscrcdn
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200M"
+        max-file: "10"
+    networks:
+      - netoops
+    volumes:
+      - /home/mingguangzhen/kscrcdn_ng/html/fe_kscrcdn:/data
+    command: cp -rp /fe_kscrcdn/dist/. /data/
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+
+  kscrcdn_ng:
+    image: nginx:1.19
+    environment:
+      TZ: "Asia/Shanghai"
+    networks:
+      - netoops
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200M"
+        max-file: "10"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /home/mingguangzhen/kscrcdn_ng/log:/var/log/nginx
+      - /home/mingguangzhen/kscrcdn_ng/conf:/etc/nginx/conf
+      - /home/mingguangzhen/kscrcdn_ng/html:/usr/share/nginx/html
+      - ../static/:/www/static
+    depends_on:
+      - kscrcdn_api
+    ports:
+      - "10.64.18.33:80:80"
+    command: nginx -c /etc/nginx/conf/nginx.conf
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 500M
+
+  kscrcdn_celery_worker_default:
+    image: kscrcdn_api
+    environment:
+      TZ: "Asia/Shanghai"
+    extra_hosts:
+      - "mysql-server:10.69.79.101"
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "200M"
+        max-file: "10"
+    networks:
+      - netoops
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /home/mingguangzhen/kscrcdn_api/log:/kscrcdn_api/log
+    command: /usr/local/bin/celery -A kscrcdn_api.mycelery.app worker -l info -Q default -n worker_default@%h
+    depends_on:
+      - redis-server
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory:  800M
